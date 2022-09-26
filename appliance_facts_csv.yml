@@ -1,0 +1,60 @@
+---
+- name: Write appliance facts into a csv file
+  hosts: mview
+  become: true
+  
+  vars:
+    output_path: "/home/ansible/appliance_facts"
+    filename: "appliance_facts_{{ date }}.csv"
+
+  tasks:
+    - name: Generate CSV filename
+      set_fact: date="{{lookup('pipe','date +%Y%m%d')}}"
+      run_once: true
+      
+    - name: Create CSV file and set the header
+      ansible.builtin.lineinfile:
+        dest: "{{ output_path }}/{{ filename }}"
+        line:
+          Asset_tag,Hostname,interface,ipv4,Mac_address,Subnet,Default_Gateway
+        create: yes
+        state: present
+        owner: ansible
+        group: ansible
+      delegate_to: localhost
+
+    - name: Get appliance asset tag and store as var
+      shell: "dmidecode -s system-serial-number"
+      register: asset_tag
+
+    - name: Get interface name
+      shell: ip -4 -o a | cut -d ' ' -f 2,7 | cut -d '/' -f 1 | grep -v lo | grep -v docker | cut -d ' ' -f 1
+      register: interface_name
+
+    - name: Get interface name
+      shell: ip -4 -o a | cut -d ' ' -f 2,7 | cut -d '/' -f 1 | grep -v lo | grep -v docker | cut -d ' ' -f 2
+      register: ip_address    
+      
+    - name: Get interface name
+      shell: ip -4 -o link | awk '{ print $2" "$17 }' | grep -v lo | grep -v docker
+      register: interface_mac 
+
+    - name: Get appliance facts
+      set_fact:
+        csv_tmp: >
+          {{ asset_tag.stdout }},{{ ansible_fqdn }},{{ interface_name.stdout_lines | join ('|') }},{{ ip_address.stdout_lines|join('|') }},{{interface_mac.stdout_lines|join('|') }},{{ ansible_default_ipv4.netmask }},{{ ansible_default_ipv4.gateway }}
+
+
+    - name: Write information into .csv file
+      ansible.builtin.lineinfile:
+        insertafter: EOF
+        dest: "{{ output_path }}/{{ filename }}"
+        line: "{{ csv_tmp }}"
+      delegate_to: localhost
+
+    - name: Blank lines removal
+      ansible.builtin.lineinfile:
+        path: "./{{ output_path }}/{{ filename }}"
+        state: absent
+        regex: '^\s*$'
+      delegate_to: localhost
